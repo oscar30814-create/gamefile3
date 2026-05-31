@@ -1,0 +1,201 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+canvas { display: block; border: 1.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); }
+#ui { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 8px; }
+#info { font-size: 13px; color: var(--color-text-secondary); }
+#score-box { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
+#restart-btn { font-size: 13px; padding: 5px 14px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); color: var(--color-text-primary); cursor: pointer; }
+#restart-btn:hover { background: var(--color-background-tertiary); }
+#ctrl { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 10px; }
+.row { display: flex; gap: 4px; }
+.dpad { width: 44px; height: 44px; border: 0.5px solid var(--color-border-secondary); border-radius: 8px; background: var(--color-background-secondary); color: var(--color-text-primary); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; user-select: none; }
+.dpad:active { background: var(--color-background-tertiary); transform: scale(0.95); }
+</style>
+
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;">逃脫遊戲：用方向鍵移動玩家，碰到鑰匙獲勝，避開紅色敵人。</h2>
+<div id="ui">
+  <span id="info">方向鍵 / WASD 移動</span>
+  <span id="score-box">敵人數：<span id="enemy-count">0</span></span>
+  <button id="restart-btn">重新開始</button>
+</div>
+<canvas id="c" width="640" height="400"></canvas>
+<div id="ctrl">
+  <div class="row"><button class="dpad" id="up">↑</button></div>
+  <div class="row">
+    <button class="dpad" id="left">←</button>
+    <button class="dpad" id="down">↓</button>
+    <button class="dpad" id="right">→</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const TILE = 20;
+const COLS = W / TILE, ROWS = H / TILE;
+
+let player, enemies, key, state, score, spawnTimer, spawnInterval;
+
+function initGame() {
+  player = { x: 2, y: 2, size: TILE - 2 };
+  key = { x: COLS - 3, y: ROWS - 3, size: TILE - 4 };
+  enemies = [];
+  state = 'playing';
+  score = 0;
+  spawnTimer = 0;
+  spawnInterval = 120;
+  document.getElementById('enemy-count').textContent = '0';
+}
+
+function spawnEnemy() {
+  const edges = [];
+  for (let x = 0; x < COLS; x++) { edges.push({x, y: 0}); edges.push({x, y: ROWS-1}); }
+  for (let y = 1; y < ROWS-1; y++) { edges.push({x: 0, y}); edges.push({x: COLS-1, y}); }
+  const pos = edges[Math.floor(Math.random() * edges.length)];
+  const dist = Math.abs(pos.x - player.x) + Math.abs(pos.y - player.y);
+  if (dist < 5) return;
+  enemies.push({ x: pos.x, y: pos.y, size: TILE - 2, timer: 0, interval: 18 + Math.floor(Math.random() * 12) });
+}
+
+function moveEnemies() {
+  for (const e of enemies) {
+    e.timer++;
+    if (e.timer >= e.interval) {
+      e.timer = 0;
+      const dx = player.x - e.x, dy = player.y - e.y;
+      if (Math.abs(dx) > Math.abs(dy)) e.x += dx > 0 ? 1 : -1;
+      else e.y += dy > 0 ? 1 : -1;
+      e.x = Math.max(0, Math.min(COLS - 1, e.x));
+      e.y = Math.max(0, Math.min(ROWS - 1, e.y));
+    }
+  }
+}
+
+function checkCollisions() {
+  for (const e of enemies) {
+    if (Math.abs(e.x - player.x) < 1 && Math.abs(e.y - player.y) < 1) return 'lose';
+  }
+  if (Math.abs(key.x - player.x) < 1 && Math.abs(key.y - player.y) < 1) return 'win';
+  return null;
+}
+
+function drawGrid() {
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--color-background-primary') || '#fff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(128,128,128,0.08)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= W; x += TILE) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y <= H; y += TILE) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+}
+
+function drawPlayer() {
+  const px = player.x * TILE + 1, py = player.y * TILE + 1;
+  ctx.fillStyle = '#378ADD';
+  ctx.beginPath();
+  ctx.roundRect(px, py, player.size, player.size, 4);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('P', px + player.size/2, py + player.size/2);
+}
+
+function drawKey() {
+  const kx = key.x * TILE + 2, ky = key.y * TILE + 2;
+  ctx.fillStyle = '#EF9F27';
+  ctx.beginPath();
+  ctx.roundRect(kx, ky, key.size, key.size, TILE/2);
+  ctx.fill();
+  ctx.fillStyle = '#633806';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('K', kx + key.size/2, ky + key.size/2);
+}
+
+function drawEnemies() {
+  for (const e of enemies) {
+    const ex = e.x * TILE + 1, ey = e.y * TILE + 1;
+    ctx.fillStyle = '#E24B4A';
+    ctx.beginPath();
+    ctx.roundRect(ex, ey, e.size, e.size, 4);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('E', ex + e.size/2, ey + e.size/2);
+  }
+}
+
+function drawOverlay(msg, sub, color) {
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = color;
+  ctx.font = '500 32px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(msg, W/2, H/2 - 16);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(sub, W/2, H/2 + 22);
+}
+
+function loop() {
+  requestAnimationFrame(loop);
+  if (state !== 'playing') return;
+
+  spawnTimer++;
+  if (spawnTimer >= spawnInterval) {
+    spawnTimer = 0;
+    spawnEnemy();
+    score++;
+    if (spawnInterval > 40) spawnInterval -= 2;
+    document.getElementById('enemy-count').textContent = enemies.length;
+  }
+
+  moveEnemies();
+  const result = checkCollisions();
+
+  drawGrid();
+  drawKey();
+  drawEnemies();
+  drawPlayer();
+
+  if (result === 'lose') { state = 'over'; drawOverlay('GAME OVER', '按「重新開始」再試一次', '#F09595'); }
+  else if (result === 'win') { state = 'win'; drawOverlay('YOU WIN!', '恭喜你找到鑰匙！', '#5DCAA5'); }
+}
+
+const keys = {};
+document.addEventListener('keydown', e => {
+  if (state !== 'playing') return;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d'].includes(e.key)) e.preventDefault();
+  let nx = player.x, ny = player.y;
+  if (e.key === 'ArrowUp' || e.key === 'w') ny--;
+  if (e.key === 'ArrowDown' || e.key === 's') ny++;
+  if (e.key === 'ArrowLeft' || e.key === 'a') nx--;
+  if (e.key === 'ArrowRight' || e.key === 'd') nx++;
+  player.x = Math.max(0, Math.min(COLS-1, nx));
+  player.y = Math.max(0, Math.min(ROWS-1, ny));
+});
+
+function move(dir) {
+  if (state !== 'playing') return;
+  if (dir === 'up') player.y = Math.max(0, player.y - 1);
+  if (dir === 'down') player.y = Math.min(ROWS-1, player.y + 1);
+  if (dir === 'left') player.x = Math.max(0, player.x - 1);
+  if (dir === 'right') player.x = Math.min(COLS-1, player.x + 1);
+}
+
+document.getElementById('up').addEventListener('click', () => move('up'));
+document.getElementById('down').addEventListener('click', () => move('down'));
+document.getElementById('left').addEventListener('click', () => move('left'));
+document.getElementById('right').addEventListener('click', () => move('right'));
+document.getElementById('restart-btn').addEventListener('click', () => { initGame(); });
+
+initGame();
+loop();
+</script>
